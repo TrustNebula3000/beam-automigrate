@@ -28,6 +28,8 @@ module Database.Beam.AutoMigrate
     runMigrationUnsafe,
     runMigrationWithEditUpdate,
     tryRunMigrationsWithEditUpdate,
+    runMigrationWithEditUpdate',
+    tryRunMigrationsWithEditUpdate',
     calcMigrationSteps,
 
     -- * Creating a migration from a Diff
@@ -259,7 +261,17 @@ runMigrationWithEditUpdate ::
   Pg.Connection ->
   Schema ->
   IO ()
-runMigrationWithEditUpdate editUpdate conn hsSchema = do
+runMigrationWithEditUpdate = 
+  runMigrationWithEditUpdate' Pg.withTransaction
+
+runMigrationWithEditUpdate' ::
+  MonadBeam Pg.Postgres Pg.Pg =>
+  (forall a. Pg.Connection -> IO a -> IO a) ->
+  ([WithPriority Edit] -> [WithPriority Edit]) ->
+  Pg.Connection ->
+  Schema ->
+  IO ()
+runMigrationWithEditUpdate' transactionFn editUpdate conn hsSchema = do
   -- Create the migration with all the safeety information
   edits <- either throwIO pure =<< evalMigration (migrate conn hsSchema)
   -- Apply the user function to possibly update the list of edits to allow the user to
@@ -275,7 +287,7 @@ runMigrationWithEditUpdate editUpdate conn hsSchema = do
     throwIO $ UnsafeEditsDetected $ fmap (\(WithPriority (e, _)) -> _editAction e) newEdits
 
   -- Execute all the edits within a single transaction so we rollback if any of them fail.
-  Pg.withTransaction conn $
+  transactionFn conn $
     Pg.runBeamPostgres conn $
       forM_ newEdits $ \(WithPriority (edit, _)) -> do
         case _editCondition edit of
@@ -695,8 +707,6 @@ prettyEditActionDescription = T.unwords . \case
 prettyPrintEdits :: [WithPriority Edit] -> IO ()
 prettyPrintEdits edits = putStrLn $ T.unpack $ T.unlines $ fmap (prettyEditSQL . fst . unPriority) (sortEdits edits)
 
--- | Compare the existing schema in the database with the expected
--- schema in Haskell and try to edit the existing schema as necessary
 tryRunMigrationsWithEditUpdate
   :: ( Generic (db (DatabaseEntity be db))
      , (Generic (db (AnnotatedDatabaseEntity be db)))
@@ -714,7 +724,30 @@ tryRunMigrationsWithEditUpdate
   => AnnotatedDatabaseSettings be db
   -> Pg.Connection
   -> IO ()
-tryRunMigrationsWithEditUpdate annotatedDb conn = do
+tryRunMigrationsWithEditUpdate =
+  tryRunMigrationsWithEditUpdate' Pg.withTransaction
+
+-- | Compare the existing schema in the database with the expected
+-- schema in Haskell and try to edit the existing schema as necessary
+tryRunMigrationsWithEditUpdate'
+  :: ( Generic (db (DatabaseEntity be db))
+     , (Generic (db (AnnotatedDatabaseEntity be db)))
+     , Database be db
+     , (GZipDatabase be
+         (AnnotatedDatabaseEntity be db)
+         (AnnotatedDatabaseEntity be db)
+         (DatabaseEntity be db)
+         (Rep (db (AnnotatedDatabaseEntity be db)))
+         (Rep (db (AnnotatedDatabaseEntity be db)))
+         (Rep (db (DatabaseEntity be db)))
+       )
+     , (GSchema be db '[] (Rep (db (AnnotatedDatabaseEntity be db))))
+     )
+  => (forall a. Pg.Connection -> IO a -> IO a) 
+  -> AnnotatedDatabaseSettings be db
+  -> Pg.Connection
+  -> IO ()
+tryRunMigrationsWithEditUpdate' transactionFn annotatedDb conn = do
     let expectedHaskellSchema = fromAnnotatedDbSettings annotatedDb (Proxy @'[])
     actualDatabaseSchema <- getSchema conn
     case diff expectedHaskellSchema actualDatabaseSchema of
@@ -727,7 +760,7 @@ tryRunMigrationsWithEditUpdate annotatedDb conn = do
         putStrLn "Database migration required, attempting..."
         prettyPrintEdits edits
 
-        try (runMigrationWithEditUpdate Prelude.id conn expectedHaskellSchema) >>= \case
+        try (runMigrationWithEditUpdate' transactionFn Prelude.id conn expectedHaskellSchema) >>= \case
           Left (e :: SomeException) ->
             error $ "Database migration error: " <> displayException e
           Right _ ->
