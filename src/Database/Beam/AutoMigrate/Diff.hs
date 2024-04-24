@@ -21,6 +21,7 @@ module Database.Beam.AutoMigrate.Diff
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Exception (assert)
 import Control.Monad
 import Data.DList (DList)
@@ -31,10 +32,14 @@ import qualified Data.List as L
 import Data.Map.Merge.Strict
 import qualified Data.Map.Strict as M
 import Data.Maybe
+import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time
 import Data.Word (Word8)
 import Database.Beam.AutoMigrate.Types
+import qualified Database.Beam.Backend.SQL.AST as AST
 
 --
 -- Simple typeclass to diff things
@@ -60,10 +65,12 @@ editPriority = \case
   TableConstraintAdded _ Unique {} -> Priority 6
   TableConstraintAdded _ PrimaryKey {} -> Priority 7
   TableConstraintAdded _ ForeignKey {} -> Priority 8
-  ColumnConstraintAdded {} -> Priority 9
-  TableConstraintRemoved {} -> Priority 10
-  ColumnConstraintRemoved {} -> Priority 11
-  -- Destructive operations go last
+  TableConstraintRemoved {} -> Priority 9
+  -- Column constraints are removed before being added because a change in a constraint would result in
+  -- dropping the constraint altogether otherwise.
+  ColumnConstraintRemoved {} -> Priority 10
+  ColumnConstraintAdded {} -> Priority 11
+  -- Other destructive operations go last
   ColumnRemoved {} -> Priority 12
   TableRemoved {} -> Priority 13
   EnumTypeRemoved {} -> Priority 14
@@ -322,10 +329,61 @@ diffTable tName hsTable dbTable = do
     whenBoth :: WhenMatched (Either DiffError) ColumnName Column Column (DList (WithPriority Edit))
     whenBoth = zipWithAMatched (diffColumn tName)
 
+tryParseTime :: Text -> Maybe UTCTime
+tryParseTime t =
+      parseTimeM True defaultTimeLocale "%F %T+00" s
+  <|> parseTimeM True defaultTimeLocale "'%F %T+00'::timestamp with time zone" s
+  <|> parseTimeM True defaultTimeLocale "%F %TZ" s
+  <|> parseTimeM True defaultTimeLocale "'%F %TZ'::timestamp with time zone" s
+  <|> parseTimeM True defaultTimeLocale "%F %T%Z" s
+  <|> parseTimeM True defaultTimeLocale "'%F %T%Z'::timestamp with time zone" s
+  where s = T.unpack t
+
+defaultConstraintEquivalent :: ColumnType -> ColumnType -> Text -> Text -> Bool
+defaultConstraintEquivalent hsDataType dbDataType hsVal dbVal
+  | hsDataType == dbDataType =
+    case hsDataType of
+      SqlStdType (AST.DataTypeTimeStamp {}) ->
+        case (,) <$> tryParseTime hsVal <*> tryParseTime dbVal of
+          Just (hsT, dbT) -> hsT == dbT
+          Nothing -> hsVal == dbVal
+      _ -> hsVal == dbVal
+        -- When enumerations are serialized by postgresql-simple, they are quoted, but don't have their type annotation.
+        -- Postgres, however, seems to add an explicit SQL type annotation. We try looking for one and seeing if the
+        -- remainder is a quoted string that matches the value provided by the Haskell side.
+        || let (pre,_post) = T.breakOnEnd "::" dbVal
+           in equalQuoted hsVal (T.dropEnd 2 pre)
+  | otherwise = False
+  where
+    equalQuoted s t = (== Just True) $ do
+      s' <- stripQuotes s
+      t' <- stripQuotes t
+      return $ s' == t'
+    -- Since we're not doing this parsing of the SQL type annotation in a full-fledged way,
+    -- at least see that the remaining bits are single-quoted by postgres as a sanity check.
+    stripQuotes t = do
+      t' <- T.stripPrefix "'" t
+      T.stripSuffix "'" t'
+
+isDefaultConstraint :: ColumnConstraint -> Bool
+isDefaultConstraint (Default {}) = True
+isDefaultConstraint _ = False
+
+getDefaultConstraint :: Set ColumnConstraint -> Maybe Text
+getDefaultConstraint cons = listToMaybe [d | Default d <- S.toList cons]
+
 diffColumn :: TableName -> ColumnName -> Column -> Column -> DiffA DList
 diffColumn tName colName hsColumn dbColumn = do
-  let constraintsAdded = S.difference (columnConstraints hsColumn) (columnConstraints dbColumn)
-      constraintsRemoved = S.difference (columnConstraints dbColumn) (columnConstraints hsColumn)
+  let hsColumnCons = columnConstraints hsColumn
+      dbColumnCons = columnConstraints dbColumn
+      hsDefaultConM = getDefaultConstraint hsColumnCons
+      dbDefaultConM = getDefaultConstraint dbColumnCons
+  let defaultsExistAndEquivalent = case (hsDefaultConM, dbDefaultConM) of
+        (Just hs, Just db) -> defaultConstraintEquivalent (columnType hsColumn) (columnType dbColumn) hs db
+        _ -> False
+      filterCons = if defaultsExistAndEquivalent then S.filter (not . isDefaultConstraint) else id
+      constraintsAdded = filterCons (S.difference hsColumnCons dbColumnCons)
+      constraintsRemoved = filterCons (S.difference dbColumnCons hsColumnCons)
   let colConstraintsAdded = do
         guard (not $ S.null constraintsAdded)
         pure $ D.map (mkEdit . ColumnConstraintAdded tName colName) (D.fromList . S.toList $ constraintsAdded)
