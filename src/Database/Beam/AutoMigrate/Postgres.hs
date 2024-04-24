@@ -216,9 +216,16 @@ extensionTypeNamesQ =
         "WHERE ns.nspname = 'public' AND ty.typcategory = 'U' "
       ]
 
+-- | Used to ensure timestamps are reported in UTC, which helps make default constraint parsing/comparison a little
+-- simpler.
+setLocalTimeZoneUTC :: Pg.Query
+setLocalTimeZoneUTC =
+  fromString "SET LOCAL TimeZone TO 'UTC'"
+
 -- | Connects to a running PostgreSQL database and extract the relevant 'Schema' out of it.
 getSchema :: Pg.Connection -> IO Schema
 getSchema conn = do
+  _ <- Pg.execute_ conn setLocalTimeZoneUTC
   allTableConstraints <- getAllConstraints conn
   allDefaults <- getAllDefaults conn
   extensionTypeData <- Pg.fold_ conn extensionTypeNamesQ mempty getExtension
