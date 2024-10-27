@@ -26,6 +26,8 @@ module Database.Beam.AutoMigrate
     Migration,
     migrate,
     runMigrationUnsafe,
+    AutoMigrateConfig(..),
+    defaultAutoMigrateConfig,
     runMigrationWithEditUpdate,
     tryRunMigrationsWithEditUpdate,
     runMigrationWithEditUpdate',
@@ -262,16 +264,16 @@ runMigrationWithEditUpdate ::
   Schema ->
   IO ()
 runMigrationWithEditUpdate = 
-  runMigrationWithEditUpdate' Pg.withTransaction
+  runMigrationWithEditUpdate' defaultAutoMigrateConfig
 
 runMigrationWithEditUpdate' ::
   MonadBeam Pg.Postgres Pg.Pg =>
-  (forall a. Pg.Connection -> IO a -> IO a) ->
+  AutoMigrateConfig ->
   ([WithPriority Edit] -> [WithPriority Edit]) ->
   Pg.Connection ->
   Schema ->
   IO ()
-runMigrationWithEditUpdate' transactionFn editUpdate conn hsSchema = do
+runMigrationWithEditUpdate' (AutoMigrateConfig transactionFn logFn) editUpdate conn hsSchema = do
   -- Create the migration with all the safeety information
   edits <- either throwIO pure =<< evalMigration (migrate conn hsSchema)
   -- Apply the user function to possibly update the list of edits to allow the user to
@@ -280,8 +282,8 @@ runMigrationWithEditUpdate' transactionFn editUpdate conn hsSchema = do
   -- If the new list of edits still contains any unsafe edits then fail out.
 
   when (newEdits /= sortEdits edits) $ do
-    putStrLn "Changes requested to diff induced migration. Attempting..."
-    prettyPrintEdits newEdits
+    logFn "Changes requested to diff induced migration. Attempting..."
+    logFn $ prettyPrintEdits newEdits
 
   when (any (editSafetyIs Unsafe . fst . unPriority) newEdits) $
     throwIO $ UnsafeEditsDetected $ fmap (\(WithPriority (e, _)) -> _editAction e) newEdits
@@ -316,7 +318,7 @@ runMigrationWithEditUpdate' transactionFn editUpdate conn hsSchema = do
       runNoReturn $ editToSqlCommand edit
 
     printmsg :: MonadIO m => String -> m ()
-    printmsg = liftIO . putStrLn . mappend "[beam-migrate] "
+    printmsg = liftIO . logFn . mappend "[beam-migrate] "
 
 -- | Helper query to retrieve the approximate row count from the @pg_class@ table.
 --
@@ -704,8 +706,8 @@ prettyEditActionDescription = T.unwords . \case
     pshow' :: Show a => a -> Text
     pshow' = LT.toStrict . PS.pShow
 
-prettyPrintEdits :: [WithPriority Edit] -> IO ()
-prettyPrintEdits edits = putStrLn $ T.unpack $ T.unlines $ fmap (prettyEditSQL . fst . unPriority) (sortEdits edits)
+prettyPrintEdits :: [WithPriority Edit] -> String
+prettyPrintEdits edits = T.unpack $ T.unlines $ fmap (prettyEditSQL . fst . unPriority) (sortEdits edits)
 
 tryRunMigrationsWithEditUpdate
   :: ( Generic (db (DatabaseEntity be db))
@@ -725,7 +727,20 @@ tryRunMigrationsWithEditUpdate
   -> Pg.Connection
   -> IO ()
 tryRunMigrationsWithEditUpdate =
-  tryRunMigrationsWithEditUpdate' Pg.withTransaction
+  tryRunMigrationsWithEditUpdate' defaultAutoMigrateConfig
+
+data AutoMigrateConfig
+  = AutoMigrateConfig
+  { autoMigrateConfig_transactionFn :: forall a. Pg.Connection -> IO a -> IO a
+  , autoMigrateConfig_logFn :: String -> IO ()
+  }
+
+defaultAutoMigrateConfig :: AutoMigrateConfig
+defaultAutoMigrateConfig =
+  AutoMigrateConfig
+  { autoMigrateConfig_transactionFn = Pg.withTransaction
+  , autoMigrateConfig_logFn = putStrLn
+  }
 
 -- | Compare the existing schema in the database with the expected
 -- schema in Haskell and try to edit the existing schema as necessary
@@ -743,24 +758,25 @@ tryRunMigrationsWithEditUpdate'
        )
      , (GSchema be db '[] (Rep (db (AnnotatedDatabaseEntity be db))))
      )
-  => (forall a. Pg.Connection -> IO a -> IO a) 
+  => AutoMigrateConfig
   -> AnnotatedDatabaseSettings be db
   -> Pg.Connection
   -> IO ()
-tryRunMigrationsWithEditUpdate' transactionFn annotatedDb conn = do
+tryRunMigrationsWithEditUpdate' config annotatedDb conn = do
+    let logFn = autoMigrateConfig_logFn config
     let expectedHaskellSchema = fromAnnotatedDbSettings annotatedDb (Proxy @'[])
     actualDatabaseSchema <- getSchema conn
     case diff expectedHaskellSchema actualDatabaseSchema of
       Left err -> do
-        putStrLn "Error detecting database migration requirements: "
-        print err
+        logFn "Error detecting database migration requirements: "
+        logFn $ show err
       Right [] ->
-        putStrLn "No database migration required, continuing startup."
+        logFn "No database migration required, continuing startup."
       Right edits -> do
-        putStrLn "Database migration required, attempting..."
-        prettyPrintEdits edits
+        logFn "Database migration required, attempting..."
+        logFn $ prettyPrintEdits edits
 
-        try (runMigrationWithEditUpdate' transactionFn Prelude.id conn expectedHaskellSchema) >>= \case
+        try (runMigrationWithEditUpdate' config Prelude.id conn expectedHaskellSchema) >>= \case
           Left (e :: SomeException) ->
             error $ "Database migration error: " <> displayException e
           Right _ ->
