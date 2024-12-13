@@ -215,6 +215,10 @@ instance HasColumnType UUID where
   defaultColumnType _ = PgSpecificType PgUuid
   defaultTypeCast _ = Just "uuid"
 
+instance HasColumnType Pg.TsVector where
+  defaultColumnType _ = PgSpecificType PgTsVector
+  defaultTypeCast _ = Just "tsvector"
+
 --
 -- support for json types
 --

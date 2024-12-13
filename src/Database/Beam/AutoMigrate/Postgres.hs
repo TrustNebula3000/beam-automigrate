@@ -27,6 +27,7 @@ import qualified Data.Vector as V
 import Database.Beam.AutoMigrate.Types
 import Database.Beam.Backend.SQL hiding (tableName)
 import qualified Database.Beam.Backend.SQL.AST as AST
+import qualified Database.Beam.Postgres.Syntax as Pg
 import qualified Database.PostgreSQL.Simple as Pg
 import Database.PostgreSQL.Simple.FromField (FromField (..), fromField, returnError)
 import Database.PostgreSQL.Simple.FromRow (FromRow (..), field)
@@ -407,6 +408,8 @@ pgTypeToColumnType extensionTypeData oid width
     Just (PgSpecificType PgUuid)
   | Pg.typoid Pg.oid == oid =
     Just (PgSpecificType PgOid)
+  | Pg.typoid Pg.pgTsVectorTypeInfo == oid =
+    Just (PgSpecificType PgTsVector)
   | M.lookup oid extensionTypeData == Just "ltree" =
     Just (PgSpecificType PgLTree)
   | M.lookup oid extensionTypeData == Just "vector" =

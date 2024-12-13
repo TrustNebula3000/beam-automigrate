@@ -160,6 +160,7 @@ data PgDataType
   | PgOid
   | PgLTree
   | PgVector (Maybe Natural)
+  | PgTsVector
 
 deriving instance Show PgDataType
 
