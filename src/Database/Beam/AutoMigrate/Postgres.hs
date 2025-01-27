@@ -214,7 +214,7 @@ extensionTypeNamesQ =
       [ "SELECT ty.oid, ty.typname ",
         "FROM pg_type ty ",
         "INNER JOIN pg_namespace ns ON ty.typnamespace = ns.oid ",
-        "WHERE ns.nspname = 'public' AND ty.typcategory = 'U' "
+        "WHERE (ns.nspname = 'public' OR ns.nspname = 'pg_catalog') AND ty.typcategory = 'U' "
       ]
 
 -- | Used to ensure timestamps are reported in UTC, which helps make default constraint parsing/comparison a little
@@ -408,7 +408,7 @@ pgTypeToColumnType extensionTypeData oid width
     Just (PgSpecificType PgUuid)
   | Pg.typoid Pg.oid == oid =
     Just (PgSpecificType PgOid)
-  | Pg.typoid Pg.pgTsVectorTypeInfo == oid =
+  | M.lookup oid extensionTypeData == Just "tsvector" =
     Just (PgSpecificType PgTsVector)
   | M.lookup oid extensionTypeData == Just "ltree" =
     Just (PgSpecificType PgLTree)
