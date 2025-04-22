@@ -164,7 +164,7 @@ mkTableEntryNoFkDiscovery annEntity =
       pks = if S.null pkColSet then mempty else S.singleton (PrimaryKey (tName <> "_pkey") pkColSet)
       (columns, seqs) = gColumns (Proxy @'GenSequences) (TableName tName) . from $ dbAnnotatedSchema (annEntity ^. annotatedDescriptor)
       annotatedCons = dbAnnotatedConstraints (annEntity ^. annotatedDescriptor)
-   in ((TableName tName, Table (pks <> annotatedCons) columns), seqs)
+   in ((TableName tName, Table (pks <> annotatedCons) columns mempty), seqs)
 
 mkTableEntryFkDiscovery ::
   ( GColumns 'GenSequences (Rep (TableSchema tbl)),

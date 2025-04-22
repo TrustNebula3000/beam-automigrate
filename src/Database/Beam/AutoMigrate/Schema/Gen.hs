@@ -371,7 +371,7 @@ genColumns = do
 genTable :: Tables -> Gen Table
 genTable currentTables = do
   cols <- genColumns
-  Table <$> genTableConstraints currentTables cols <*> pure cols
+  Table <$> genTableConstraints currentTables cols <*> pure cols <*> pure mempty
 
 genSchema :: Gen Schema
 genSchema = sized $ \tableNum -> do

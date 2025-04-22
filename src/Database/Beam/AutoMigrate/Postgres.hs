@@ -91,6 +91,9 @@ instance FromField SqlRawOtherConstraintType where
       "u" -> pure SQL_raw_unique
       _ -> returnError Pg.ConversionFailed f t
 
+instance FromField IndexName where
+  fromField f dat = IndexName <$> fromField f dat
+
 --
 -- Postgres queries to extract the schema out of the DB
 --
@@ -229,11 +232,12 @@ getSchema conn = do
   _ <- Pg.execute_ conn setLocalTimeZoneUTC
   allTableConstraints <- getAllConstraints conn
   allDefaults <- getAllDefaults conn
+  allIndexes <- getAllIndexes conn
   extensionTypeData <- Pg.fold_ conn extensionTypeNamesQ mempty getExtension
   enumerationData <- Pg.fold_ conn enumerationsQ mempty getEnumeration
   sequences <- Pg.fold_ conn sequencesQ mempty getSequence
   tables <-
-    Pg.fold_ conn userTablesQ mempty (getTable allDefaults extensionTypeData enumerationData allTableConstraints)
+    Pg.fold_ conn userTablesQ mempty (getTable allDefaults allIndexes extensionTypeData enumerationData allTableConstraints)
   pure $ Schema tables (M.fromList $ M.elems enumerationData) sequences
   where
     getExtension ::
@@ -262,16 +266,22 @@ getSchema conn = do
 
     getTable ::
       AllDefaults ->
+      AllIndexes ->
       Map Pg.Oid ExtensionTypeName ->
       Map Pg.Oid (EnumerationName, Enumeration) ->
       AllTableConstraints ->
       Tables ->
       (Pg.Oid, Text) ->
       IO Tables
-    getTable allDefaults extensionTypeData enumData allTableConstraints allTables (oid, TableName -> tName) = do
+    getTable allDefaults allIndexes extensionTypeData enumData allTableConstraints allTables (oid, TableName -> tName) = do
       pgColumns <- Pg.query conn tableColumnsQ (Pg.Only oid)
       newTable <-
-        Table (fromMaybe noTableConstraints (M.lookup tName allTableConstraints))
+        (\cs ->
+          Table
+            (fromMaybe noTableConstraints (M.lookup tName allTableConstraints))
+            cs
+            (fromMaybe noIndexes (M.lookup tName allIndexes))
+        )
           <$> foldlM (getColumns tName extensionTypeData enumData allDefaults) mempty pgColumns
       pure $ M.insert tName newTable allTables
 
@@ -550,6 +560,20 @@ mkAction c = case c of
   "n" -> SetNull
   "d" -> SetDefault
   _ -> error . T.unpack $ "unknown reference action type: " <> c
+
+--
+-- Index discovery
+--
+
+type AllIndexes = Map TableName (Set IndexName)
+
+getAllIndexes :: Pg.Connection -> IO AllIndexes
+getAllIndexes conn =
+  Pg.fold_ conn "SELECT tablename, indexname FROM pg_indexes" mempty (\acc -> pure . addIndex acc)
+  where
+    addIndex :: AllIndexes -> (TableName, IndexName) -> AllIndexes
+    addIndex acc (tableName, indexName) =
+      M.insertWith (<>) tableName (S.singleton indexName) acc
 
 --
 -- Useful combinators to add constraints for a column or table if already there.

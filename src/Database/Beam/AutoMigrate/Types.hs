@@ -107,7 +107,8 @@ instance IsString TableName where
 
 data Table = Table
   { tableConstraints :: Set TableConstraint,
-    tableColumns :: Columns
+    tableColumns :: Columns,
+    tableIndexes :: Indexes
   }
   deriving (Eq, Show, Generic)
 
@@ -187,10 +188,10 @@ newtype DbEnum a
   deriving (Show, Eq, Typeable, Enum, Bounded, Generic)
 
 instance Semigroup Table where
-  (Table c1 t1) <> (Table c2 t2) = Table (c1 <> c2) (t1 <> t2)
+  (Table c1 t1 i1) <> (Table c2 t2 i2) = Table (c1 <> c2) (t1 <> t2) (i1 <> i2)
 
 instance Monoid Table where
-  mempty = Table mempty mempty
+  mempty = Table mempty mempty mempty
 
 type ConstraintName = Text
 
@@ -222,6 +223,16 @@ data ReferenceAction
   deriving (Show, Eq, Ord, Generic)
 
 instance NFData ReferenceAction
+
+type Indexes = Set IndexName
+
+newtype IndexName = IndexName
+  { indexName :: Text
+  }
+  deriving (Show, Eq, Ord, NFData, Generic)
+
+instance IsString IndexName where
+  fromString = IndexName . T.pack
 
 --
 -- Modifying the 'Schema'
@@ -384,3 +395,6 @@ noTableConstraints = mempty
 
 noColumnConstraints :: Set ColumnConstraint
 noColumnConstraints = mempty
+
+noIndexes :: Set IndexName
+noIndexes = mempty
