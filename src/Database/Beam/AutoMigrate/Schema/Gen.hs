@@ -84,7 +84,7 @@ genUniqueConstraint allCols = do
     [] -> pure mempty
     _ -> do
       constraintName <- runIdentity <$> genName Identity
-      pure $ S.singleton $ Unique (constraintName <> "_unique") (S.fromList someCols)
+      pure $ S.singleton $ Unique (constraintName <> "_unique") someCols
 
 isStdType :: (ColumnName, Column) -> Bool
 isStdType (_, columnType -> SqlStdType _) = True
@@ -102,7 +102,7 @@ genPkConstraint allCols = do
     [] -> pure mempty
     _ -> do
       constraintName <- runIdentity <$> genName Identity
-      pure $ S.singleton $ PrimaryKey (constraintName <> "_pk") (S.fromList $ map fst someCols)
+      pure $ S.singleton $ PrimaryKey (constraintName <> "_pk") (map fst someCols)
   where
     notNull :: (ColumnName, Column) -> Bool
     notNull (_, col) = NotNull `S.member` columnConstraints col
@@ -471,9 +471,9 @@ deleteConstraintReferencing cName conss = S.filter (not . doesReference) conss
   where
     doesReference :: TableConstraint -> Bool
     doesReference = \case
-      PrimaryKey _ refs -> S.member cName refs
+      PrimaryKey _ refs -> cName `elem` refs
       ForeignKey _ _ refs _ _ -> let ours = S.map snd refs in S.member cName ours
-      Unique _ refs -> S.member cName refs
+      Unique _ refs -> cName `elem` refs
 
 similarColumn :: Column -> Gen Column
 similarColumn col = do

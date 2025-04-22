@@ -450,12 +450,12 @@ toSqlSyntax e =
       Unique fname cols ->
         conKeyword <> sqlEscaped fname
           <> " UNIQUE ("
-          <> T.intercalate ", " (map (sqlEscaped . columnName) (S.toList cols))
+          <> T.intercalate ", " (map (sqlEscaped . columnName) cols)
           <> ")"
       PrimaryKey fname cols ->
         conKeyword <> sqlEscaped fname
           <> " PRIMARY KEY ("
-          <> T.intercalate ", " (map (sqlEscaped . columnName) (S.toList cols))
+          <> T.intercalate ", " (map (sqlEscaped . columnName) cols)
           <> ")"
       ForeignKey fname (tableName -> tName) (S.toList -> colPair) onDelete onUpdate ->
         let (fkCols, referenced) =

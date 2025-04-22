@@ -130,13 +130,15 @@ validateSchemaTables s = forM_ (M.toList $ schemaTables s) validateTable
 -- 4. For a 'ForeignKey', the referenced columns must all be UNIQUE or PRIMARY keys.
 validateTableConstraint :: Schema -> TableName -> Table -> TableConstraint -> Either ValidationFailed ()
 validateTableConstraint s tName tbl c = case c of
-  PrimaryKey _ cols | cols `S.isSubsetOf` allTblColumns -> Right ()
-  PrimaryKey _ cols ->
-    Left $ InvalidTableConstraint c (NotAllColumnsExist tName (S.difference cols allTblColumns) allTblColumns)
+  PrimaryKey _ (S.fromList -> cols)
+    | cols `S.isSubsetOf` allTblColumns -> Right ()
+    | otherwise  ->
+        Left $ InvalidTableConstraint c (NotAllColumnsExist tName (S.difference cols allTblColumns) allTblColumns)
   ForeignKey _ referencedTable columnPairs _ _ -> checkFkIntegrity referencedTable columnPairs
-  Unique _ cols | cols `S.isSubsetOf` allTblColumns -> Right ()
-  Unique _ cols ->
-    Left $ InvalidTableConstraint c (NotAllColumnsExist tName (S.difference cols allTblColumns) allTblColumns)
+  Unique _ (S.fromList -> cols)
+    | cols `S.isSubsetOf` allTblColumns -> Right ()
+    | otherwise ->
+        Left $ InvalidTableConstraint c (NotAllColumnsExist tName (S.difference cols allTblColumns) allTblColumns)
   where
     allTblColumns :: S.Set ColumnName
     allTblColumns = M.keysSet . tableColumns $ tbl
@@ -161,9 +163,9 @@ validateTableConstraint s tName tbl c = case c of
     checkColumnsIntegrity extName extTbl referencedCols =
       let checkConstraint extCon = case extCon of
             ForeignKey {} -> Nothing
-            PrimaryKey _ cols | referencedCols `S.isSubsetOf` cols -> Just ()
+            PrimaryKey _ cols | referencedCols `S.isSubsetOf` S.fromList cols -> Just ()
             PrimaryKey {} -> Nothing
-            Unique _ cols | referencedCols `S.isSubsetOf` cols -> Just ()
+            Unique _ cols | referencedCols `S.isSubsetOf` S.fromList cols -> Just ()
             Unique {} -> Nothing
        in case asum (map checkConstraint (S.toList $ tableConstraints extTbl)) of
             Nothing ->
@@ -223,7 +225,7 @@ lookupColumnRef thisTable (tableConstraints -> constr) (Qualified extTbl colName
     lookupReference con = Alt $ case con of
       PrimaryKey _ cols
         | thisTable == extTbl ->
-          if S.member colName cols then Just (Qualified thisTable colName, con) else Nothing
+          if colName `elem` cols then Just (Qualified thisTable colName, con) else Nothing
       PrimaryKey _ _ -> Nothing
       ForeignKey _ extTbl' columnPairs _ _ ->
         let (localCols, referencedCols) = (S.map fst columnPairs, S.map snd columnPairs)
@@ -233,7 +235,7 @@ lookupColumnRef thisTable (tableConstraints -> constr) (Qualified extTbl colName
                 | otherwise -> Nothing
       Unique _ cols
         | thisTable == extTbl ->
-          if S.member colName cols then Just (Qualified thisTable colName, con) else Nothing
+          if colName `elem` cols then Just (Qualified thisTable colName, con) else Nothing
       Unique _ _ -> Nothing
 
 -- | Check that the input 'Column's type matches the input 'EnumerationName'.
@@ -298,9 +300,9 @@ validateAddTableConstraint = validateTableConstraint
 validateRemoveTableConstraint :: Schema -> TableName -> TableConstraint -> Either ValidationFailed ()
 validateRemoveTableConstraint s tName c = case c of
   PrimaryKey _ cols ->
-    forM_ (M.toList allOtherTables) (checkIntegrity (map (Qualified tName) . S.toList $ cols))
+    forM_ (M.toList allOtherTables) (checkIntegrity (map (Qualified tName) $ cols))
   Unique _ cols ->
-    forM_ (M.toList allOtherTables) (checkIntegrity (map (Qualified tName) . S.toList $ cols))
+    forM_ (M.toList allOtherTables) (checkIntegrity (map (Qualified tName) $ cols))
   ForeignKey {} -> Right ()
   where
     allOtherTables :: Tables
@@ -341,7 +343,7 @@ validateRemoveColumnConstraint tbl (Qualified tName colName) = \case
     checkIntegrity constr = case constr of
       PrimaryKey _ cols ->
         let reason = ColumnInPrimaryKeyCantBeNull (Qualified tName colName)
-         in if S.member colName cols
+         in if colName `elem` cols
               then Left $ InvalidRemoveColumnConstraint (Qualified tName colName) reason
               else Right ()
       ForeignKey {} -> Right ()

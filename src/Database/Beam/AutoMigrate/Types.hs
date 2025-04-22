@@ -197,12 +197,12 @@ type ConstraintName = Text
 
 data TableConstraint
   = -- | This set of 'Column's identifies the Table's 'PrimaryKey'.
-    PrimaryKey ConstraintName (Set ColumnName)
+    PrimaryKey ConstraintName [ColumnName]
   | -- | This set of 'Column's identifies a Table's 'ForeignKey'. This is usually found in the 'tableConstraints'
     -- of the table where the foreign key is actually defined (in terms of 'REFERENCES').
     -- The set stores a (fk_column, pk_column) correspondence.
     ForeignKey ConstraintName TableName (Set (ColumnName, ColumnName)) ReferenceAction {- onDelete -} ReferenceAction {- onUpdate -}
-  | Unique ConstraintName (Set ColumnName)
+  | Unique ConstraintName [ColumnName]
   deriving (Show, Eq, Ord, Generic)
 
 instance NFData TableConstraint

@@ -498,7 +498,7 @@ uniqueConstraintOn us =
                       let cols = concatMap (\case (U f) -> colNames (tableSettings e) f) us
                           tName = e ^. dbEntityDescriptor . dbEntityName
                           conname = T.intercalate "_" (tName : map columnName cols) <> "_ukey"
-                       in S.insert (Unique conname (S.fromList cols)) (dbAnnotatedConstraints tbl)
+                       in S.insert (Unique conname cols) (dbAnnotatedConstraints tbl)
                   }
               )
               e
