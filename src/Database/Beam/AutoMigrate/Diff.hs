@@ -61,11 +61,12 @@ editPriority = \case
   -- Operations that set constraints or change the shape of a type have lower priority
   ColumnTypeChanged {} -> Priority 4
   EnumTypeValueAdded {} -> Priority 5
+  -- table constraint removals must happen before table constraint additions, to allow table constraint *modifications*. e.g. changing a table's primary key.
   -- foreign keys need to go last, as the referenced columns needs to be either UNIQUE or have PKs.
-  TableConstraintAdded _ Unique {} -> Priority 6
-  TableConstraintAdded _ PrimaryKey {} -> Priority 7
-  TableConstraintAdded _ ForeignKey {} -> Priority 8
-  TableConstraintRemoved {} -> Priority 9
+  TableConstraintRemoved {} -> Priority 6
+  TableConstraintAdded _ Unique {} -> Priority 7
+  TableConstraintAdded _ PrimaryKey {} -> Priority 8
+  TableConstraintAdded _ ForeignKey {} -> Priority 9
   -- Column constraints are removed before being added because a change in a constraint would result in
   -- dropping the constraint altogether otherwise.
   ColumnConstraintRemoved {} -> Priority 10
