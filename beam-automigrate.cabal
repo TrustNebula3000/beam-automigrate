@@ -50,7 +50,7 @@ library
     , dlist                 >=0.8.0    && <1.1
     , microlens             >=0.4.10   && <0.6
     , mtl                   >=2.2.2    && <2.4
-    , postgresql-simple     >=0.5.4    && <0.7.0.0
+    , postgresql-simple     >=0.5.4    && <0.8
     , pretty-simple         >=2.2.0    && <4.2
     , QuickCheck            >=2.13     && <2.15
     , quickcheck-instances  >=0.3      && <0.4
