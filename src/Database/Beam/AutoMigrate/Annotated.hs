@@ -63,6 +63,7 @@ module Database.Beam.AutoMigrate.Annotated
   )
 where
 
+import qualified Data.List as L
 import Data.Kind
 import Data.Monoid (Endo (..))
 import Data.Proxy
@@ -548,7 +549,10 @@ foreignKeyOnPk externalEntity ourColumn onDelete onUpdate =
                               (fieldAsColumnNames (ourColumn (tableSettings e)))
                               (fieldAsColumnNames (Beam.pk (tableSettings externalEntity)))
                           tName = externalEntity ^. dbEntityDescriptor . dbEntityName
-                          conname = T.intercalate "_" (tName : map (columnName . snd) colPairs) <> "_fkey"
+                          srcName = e ^. dbEntityDescriptor . dbEntityName
+                          conname = case L.sort (map fst colPairs) of
+                            [] -> srcName <> "_fkey"
+                            (ColumnName cn : _) -> srcName <> "_" <> cn <> "_fkey"
                        in S.insert
                             (ForeignKey conname (TableName tName) (S.fromList colPairs) onDelete onUpdate)
                             (dbAnnotatedConstraints tbl)
